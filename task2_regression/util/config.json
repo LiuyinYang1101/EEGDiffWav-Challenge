@@ -1,5 +1,5 @@
 {
-  "dataset_folder": "path/to/dataset",
+  "dataset_folder": "C:/Users/YLY/Documents/eegAudChallenge/data",
   "raw_eeg_folder": "raw_eeg",
   "raw_stimuli_folder": "stimuli",
   "preprocessed_eeg_folder": "preprocessed_eeg",
