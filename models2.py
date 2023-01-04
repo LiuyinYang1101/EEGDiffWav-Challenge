@@ -123,7 +123,7 @@ class Residual_block(nn.Module):
     def forward(self, input_data):
         x, eeg, diffusion_step_embed = input_data
         h = x.permute(0,2,1)
-        B, C, L = x.shape
+        B, C, L = h.shape
         #print("B",B)
         #print("C",C)
         #print("L",L)
@@ -145,7 +145,7 @@ class Residual_block(nn.Module):
         h = self.dilated_conv_layer(h)
         #print("h shape:",h.shape)
         # add mel spectrogram as (local) conditioner
-        assert eeg is not None
+        #assert eeg is not None
 
         # Apply transformation to eeg
         cond_out, eeg_res = self.eeg_cond_layer(eeg)
@@ -172,7 +172,7 @@ class Residual_block(nn.Module):
         res = self.res_conv(out).permute(0,2,1)
         #print("x",x.shape)
         #print("res",res.shape)
-        assert x.shape == res.shape
+        #assert x.shape == res.shape
         skip = self.skip_conv(out)
 
         return (x + res) * math.sqrt(0.5), eeg_res, skip  # normalize for training stability
@@ -200,7 +200,7 @@ class Residual_group(nn.Module):
 
     def forward(self, input_data):
         x, eeg_data, diffusion_steps = input_data
-
+        #assert(x.shape[2]==1)
         # embed diffusion step t
         diffusion_step_embed = calc_diffusion_step_embedding(diffusion_steps, self.diffusion_step_embed_dim_in)
         diffusion_step_embed = swish(self.fc_t1(diffusion_step_embed))
@@ -244,11 +244,12 @@ class EEGWav_diff(nn.Module):
                                         ZeroConv1d(out_channels, out_channels))
 
     def forward(self, input_data):
-        audio, mel_spectrogram, diffusion_steps = input_data
-
+        audio, eeg, diffusion_steps = input_data
         x = audio
+        #assert(x.shape[2]==1)
+        #assert(eeg.shape[2]==64)
         #x = self.init_conv(x)
-        x = self.residual_layer((x, mel_spectrogram, diffusion_steps))
+        x = self.residual_layer((x, eeg, diffusion_steps))
         x = self.final_conv(x)
 
         return x

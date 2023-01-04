@@ -176,14 +176,15 @@ def training_loss(net, loss_fn, X, diffusion_hyperparams):
     _dh = diffusion_hyperparams
     T, Alpha_bar = _dh["T"], _dh["Alpha_bar"]
     
-    mel_spectrogram, audio = X
-    #print("loss calc: ", audio.shape)
+    eeg, audio = X
+    #print("loss calc audio: ", audio.shape)
+    #print("loss calc eeg: ", eeg.shape)
     B, C, L = audio.shape  # B is batchsize, C=1, L is audio length
     diffusion_steps = torch.randint(T, size=(B,1,1)).cuda()  # randomly sample diffusion steps from 1~T
     z = std_normal(audio.shape)
     #print("loss calc: z", z.shape)
     transformed_X = torch.sqrt(Alpha_bar[diffusion_steps]) * audio + torch.sqrt(1 - Alpha_bar[diffusion_steps]) * z  # compute x_t from q(x_t|x_0)
-    epsilon_theta = net((transformed_X, mel_spectrogram, diffusion_steps.view(B,1),))  # predict \epsilon according to \epsilon_\theta
+    epsilon_theta = net((transformed_X, eeg, diffusion_steps.view(B,1),))  # predict \epsilon according to \epsilon_\theta
 
 
     return loss_fn(epsilon_theta, z)
