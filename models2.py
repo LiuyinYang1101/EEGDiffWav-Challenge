@@ -38,7 +38,32 @@ class ZeroConv1d(nn.Module):
     def forward(self, x):
         out = self.conv(x)
         return out
+    
+class NormConv1d(nn.Module):
+    def __init__(self, in_channel, out_channel):
+        super(NormConv1d, self).__init__()
+        self.conv = nn.Conv1d(in_channel, out_channel, kernel_size=1, padding=0)
+        nn.init.kaiming_normal_(self.conv.weight)
 
+    def forward(self, x):
+        out = self.conv(x)
+        return out
+    
+class EEGconditioner_block_simple(nn.Module):
+    def __init__(self, in_channel, num_heads,out_channel):
+        super(EEGconditioner_block_simple, self).__init__()
+        #self.attenLayer = nn.MultiheadAttention(64, num_heads,batch_first=True)
+        self.conditionOut = NormConv1d(64,out_channel*2)
+    def forward(self, x):
+        #print("eeg input:",x.shape)
+        skip_res = x
+        h = x
+        cond_out = h.permute(0,2,1)
+        cond_out = swish(self.conditionOut(cond_out))
+        #print("eeg condition output: ",cond_out.shape)
+        res_out = (x + skip_res) * math.sqrt(0.5)
+        return cond_out, res_out
+    
 class EEGconditioner_block(nn.Module):
     def __init__(self, in_channel, num_heads,out_channel):
         super(EEGconditioner_block, self).__init__()
@@ -72,7 +97,7 @@ class Residual_block(nn.Module):
         self.dilated_conv_layer = Conv(self.res_channels, 2 * self.res_channels, kernel_size=3, dilation=dilation)
 
         # the layer-specific for EEG conditioner
-        self.eeg_cond_layer = EEGconditioner_block(64,8,res_channels)
+        self.eeg_cond_layer = EEGconditioner_block_simple(64,8,res_channels)
 
         # add mel spectrogram upsampler and conditioner conv1x1 layer
         ''' EEGWave does not use up or down sampling
