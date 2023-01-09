@@ -97,7 +97,7 @@ class Residual_block(nn.Module):
         self.dilated_conv_layer = Conv(self.res_channels, 2 * self.res_channels, kernel_size=3, dilation=dilation)
 
         # the layer-specific for EEG conditioner
-        #self.eeg_cond_layer = EEGconditioner_block_simple(64,8,res_channels)
+        self.eeg_cond_layer = EEGconditioner_block_simple(64,8,res_channels)
 
         # add mel spectrogram upsampler and conditioner conv1x1 layer
         ''' EEGWave does not use up or down sampling
@@ -149,9 +149,9 @@ class Residual_block(nn.Module):
             #assert eeg is not None
 
             # Apply transformation to eeg
-            #cond_out, eeg_res = self.eeg_cond_layer(eeg)
-            eeg_res = eeg
-            #h += cond_out
+            cond_out, eeg_res = self.eeg_cond_layer(eeg)
+            #eeg_res = eeg
+            h += cond_out
             '''
             mel_spec = torch.unsqueeze(mel_spec, dim=1)
             mel_spec = F.leaky_relu(self.upsample_conv2d[0](mel_spec), 0.4)
