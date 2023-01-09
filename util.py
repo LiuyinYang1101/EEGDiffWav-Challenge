@@ -185,6 +185,5 @@ def training_loss(net, loss_fn, X, diffusion_hyperparams):
     #print("loss calc: z", z.shape)
     transformed_X = torch.sqrt(Alpha_bar[diffusion_steps]) * audio + torch.sqrt(1 - Alpha_bar[diffusion_steps]) * z  # compute x_t from q(x_t|x_0)
     epsilon_theta = net((transformed_X, eeg, diffusion_steps.view(B,1),))  # predict \epsilon according to \epsilon_\theta
-
-
+    #print("loss calc: epsilon", epsilon_theta.shape)
     return loss_fn(epsilon_theta, z)
