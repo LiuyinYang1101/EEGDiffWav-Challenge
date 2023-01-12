@@ -11,9 +11,9 @@
         "output_directory": "logs/checkpoint",
         "tensorboard_directory": "logs/tensorboard",
         "ckpt_iter": "max",
-        "iters_per_ckpt": 200,
-        "iters_per_logging": 50,
-        "n_iters": 10000,
+        "iters_per_ckpt": 1,
+        "iters_per_logging": 1,
+        "n_iters": 2,
         "learning_rate": 2e-4,
         "batch_size_per_gpu": 2
     },

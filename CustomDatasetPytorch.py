@@ -6,6 +6,7 @@ import time
 import random
 from random import randrange
 import math
+import torchaudio.transforms as T
 
 ###Test Streaming DataLoader with PyTorch####
 class MyIterableDataset(torch.utils.data.IterableDataset):
@@ -143,8 +144,151 @@ class MyIterableDataset(torch.utils.data.IterableDataset):
                     raise StopIteration
                     print("iteration done, restart")
 
-import torchaudio.transforms as T
-import torch
+
+class CustomProcessInOrderDataset(torch.utils.data.Dataset):
+    def __init__(self, filePaths, frameLength, hopSize, device):
+        self.filePaths = self.group_recordings(filePaths)
+        self.frameLength = frameLength
+        self.hopSize = hopSize
+        self.device = device
+        self.filePage = len(self.filePaths)
+        self.filesIndex = list(range(self.filePage))
+        self.halfFile = int(self.filePage*0.5)
+        # load all data to memory as continuous data
+        self.EEGData = []
+        self.AudioData = []
+        self.EEG_on_GPU = []
+        self.Aud_on_GPU = []
+        self.loadDataToBuffer()
+        self.convertToTensorType()
+        self.noData = self.getNoData()
+        # random file order
+        self.random_file_order()
+        # send the first half to GPU
+        self.send_to_device()
+        self.firstHalf = True
+        self.firstHalfData = 0
+        # generate sample position
+        self.sampleIndxMap = []
+        self.noDataOnGPU = self.generateSamplePostionOnGPU()
+        self.firstHalfData = self.noDataOnGPU
+        print(self.filePage," files loaded. ", self.noData, " training examples loaded ", self.halfFile, " files sent to GPU, with total data number: ", self.noDataOnGPU)
+        # shuffle the training sample index to get random batch
+        self.shuffleSamplesOnGPU()
+
+    def random_file_order(self):
+        random.shuffle(self.filesIndex)
+
+    def send_to_device(self, first_half=True):
+        del self.EEG_on_GPU
+        del self.Aud_on_GPU
+        self.EEG_on_GPU = []
+        self.Aud_on_GPU = []
+        if first_half==True: # send the first half to GPU
+            self.firstHalf = True
+            for i in range(self.halfFile):
+                tempEEG = self.EEGData[self.filesIndex[i]]
+                tempAud = self.AudioData[self.filesIndex[i]]
+
+                self.EEG_on_GPU.append(tempEEG.to(self.device))
+                self.Aud_on_GPU.append(tempAud.to(self.device))
+
+        else: # send the last half to GPU
+            self.firstHalf = False
+            for i in range(self.halfFile,self.filePage):
+                tempEEG = self.EEGData[self.filesIndex[i]]
+                tempAud = self.AudioData[self.filesIndex[i]]
+
+                self.EEG_on_GPU.append(tempEEG.to(self.device))
+                self.Aud_on_GPU.append(tempAud.to(self.device))
+
+    def generateSamplePostionOnGPU(self):
+        count = 0
+        for i in range(len(self.EEG_on_GPU)):
+            _,totalLength = self.EEG_on_GPU[i].shape
+            startPos = [*range(self.frameLength, totalLength + 1, self.hopSize)]
+            for pos in startPos:
+                self.sampleIndxMap.append((i, pos))
+            noData = (totalLength - self.frameLength) // self.hopSize + 1
+            assert len(startPos) == noData
+            count += noData
+        return count
+
+    def shuffleSamplesOnGPU(self):
+        random.shuffle(self.sampleIndxMap)
+
+    def convertToTensorType(self):
+        self.EEGData = [torch.from_numpy(eegtrial).permute(1,0) for eegtrial in self.EEGData]
+        self.AudioData = [torch.from_numpy(audiotrial).permute(1,0) for audiotrial in self.AudioData]
+
+    def group_recordings(self, files):
+        # Group recordings and corresponding stimuli.
+        new_files = []
+        grouped = itertools.groupby(sorted(files), lambda x: "_-_".join(x.stem.split("_-_")[:3]))
+        for recording_name, feature_paths in grouped:
+            new_files += [sorted(feature_paths, key=lambda x: "0" if x == "eeg" else x)]
+        return new_files
+
+    def loadDataToBuffer(self):
+        for i in range(self.filePage):
+            self.EEGData.append(np.load(self.filePaths[i][0]).astype(np.float32))
+            self.AudioData.append(np.load(self.filePaths[i][1]).astype(np.float32))
+
+    def getNoData(self):
+        count = 0
+        for i in range(self.filePage):
+            _,totalLength = self.AudioData[i].shape
+            noData = (totalLength - self.frameLength) // self.hopSize + 1
+            count += noData
+        return count
+
+    def __len__(self):
+        return self.noData
+
+    def __getitem__(self, idx):
+        if  self.firstHalf==True:
+            if idx <= self.noDataOnGPU-1:
+                fileIndex = self.sampleIndxMap[idx][0]
+                endIndex = self.sampleIndxMap[idx][1]
+                startIndex = self.sampleIndxMap[idx][1] - self.frameLength
+                return self.EEG_on_GPU[fileIndex][:,startIndex:endIndex], self.Aud_on_GPU[fileIndex][:,startIndex:endIndex]
+            else: # all data on GPU has just been iterated
+                # send the second half to GPU
+                self.send_to_device(first_half=False)
+                # generate sample position
+                self.sampleIndxMap = []
+                self.noDataOnGPU = self.generateSamplePostionOnGPU()
+                #print("first half data finished ", len(self.EEG_on_GPU)," files sent to GPU, with total data number: ", self.noDataOnGPU)
+                # shuffle the training sample index to get random batch
+                self.shuffleSamplesOnGPU()
+                idx_new = idx - self.firstHalfData
+                assert(self.noDataOnGPU == self.noData-self.firstHalfData)
+                fileIndex = self.sampleIndxMap[idx_new][0]
+                endIndex = self.sampleIndxMap[idx_new][1]
+                startIndex = self.sampleIndxMap[idx_new][1] - self.frameLength
+                return self.EEG_on_GPU[fileIndex][:,startIndex:endIndex], self.Aud_on_GPU[fileIndex][:,startIndex:endIndex]
+        else:
+            idx_new = idx - self.firstHalfData
+            fileIndex = self.sampleIndxMap[idx_new][0]
+            endIndex = self.sampleIndxMap[idx_new][1]
+            startIndex = self.sampleIndxMap[idx_new][1] - self.frameLength
+            if idx < self.noData-1:
+                return self.EEG_on_GPU[fileIndex][:, startIndex:endIndex], self.Aud_on_GPU[fileIndex][:,startIndex:endIndex]
+            else: # the last sample from one complete iteration
+                tempEEG = self.EEG_on_GPU[fileIndex][:, startIndex:endIndex]
+                tempAud = self.Aud_on_GPU[fileIndex][:,startIndex:endIndex]
+                # reshuffle for a new iteration
+                self.random_file_order()
+                self.send_to_device(first_half=True)
+                # generate sample position
+                self.sampleIndxMap = []
+                self.noDataOnGPU = self.generateSamplePostionOnGPU()
+                self.firstHalfData = self.noDataOnGPU
+                #print("finish one iteration ", len(self.EEG_on_GPU), " files sent to GPU, with total data number: ", self.noDataOnGPU)
+                # shuffle the training sample index to get random batch
+                self.shuffleSamplesOnGPU()
+                return tempEEG, tempAud
+
 class CustomAllLoadDataset(torch.utils.data.Dataset):
     def __init__(self, filePaths, frameLength, hopSize):
         self.filePaths = self.group_recordings(filePaths)

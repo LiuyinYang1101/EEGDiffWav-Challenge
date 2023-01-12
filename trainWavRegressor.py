@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 
-from CustomDatasetPytorch import CustomAllLoadDataset
+from CustomDatasetPytorch import CustomProcessInOrderDataset
 
 from util import rescale, find_max_epoch, print_size
 from util import training_loss, calc_diffusion_hyperparams
@@ -105,12 +105,17 @@ def train(window_length, hop_length, num_gpus, rank, group_name, output_director
 
     train_files = [path for path in Path(data_folder).resolve().glob("train_-_*") if
                    path.stem.split("_-_")[-1].split(".")[0] in features]
-    train_dataset = CustomAllLoadDataset(train_files, window_length, hop_length)
-    train_dataset.convertToTensorType()
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    train_dataset.send_to_device(device, 0.7) #train_dataset.send_to_device(device, 1) if GPU memory allows to send all files to GPU
 
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=64, shuffle=True)
+    valid_files = [path for path in Path(data_folder).resolve().glob("val_-_*") if
+                   path.stem.split("_-_")[-1].split(".")[0] in features]
+
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    train_dataset = CustomProcessInOrderDataset(train_files, window_length, hop_length, device)
+
+    valid_dataset = CustomProcessInOrderDataset(valid_files, window_length, hop_length, device)
+
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=64, shuffle=False) #must be false
+    vali_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=64, shuffle=False) #must be false
 
     # training
     n_iter = ckpt_iter + 1
@@ -138,9 +143,24 @@ def train(window_length, hop_length, num_gpus, rank, group_name, output_director
             # note, only do this on the first gpu
         if n_iter % iters_per_logging == 0 and rank == 0:
             # save training loss to tensorboard
-            print("iteration: {} \training loss: {} \tloss: {}".format(n_iter, batch_loss / no_epoch, loss.item()))
-            tb.add_scalar("Log-Train-Loss", np.log(batch_loss / no_epoch), n_iter)
-            # tb.add_scalar("Log-Train-Reduced-Loss", np.log(reduced_loss), n_iter)
+            with torch.no_grad():
+                net.eval()  # Optional when not using Model Specific layer
+                valLoss = 0
+                no_valid_epoch = 0
+                for i, data in enumerate(vali_loader, 0):
+                    # get the inputs
+                    no_valid_epoch = i
+                    eeg, audio = data[0], data[1]
+                    # calc loss
+                    loss = mse_loss(net(eeg), audio)
+                    valLoss += loss.item()
+
+            train_loss = batch_loss / no_epoch
+            val_loss = valLoss / no_valid_epoch
+            print("iteration: {} \ training loss: {} \ validation loss: {}".format(n_iter, train_loss, val_loss))
+            print("--- %s seconds ---" % (time.time() - start_time))
+            tb.add_scalar("Log-Train-Loss", np.log(train_loss), n_iter)
+            tb.add_scalar("Log-Validation-Loss", np.log(val_loss), n_iter)
 
         # save checkpoint
         if n_iter > 0 and n_iter % iters_per_ckpt == 0 and rank == 0:
