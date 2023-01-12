@@ -74,48 +74,47 @@ class Residual_block(nn.Module):
         nn.init.kaiming_normal_(self.skip_conv.weight)
 
     def forward(self, input_data):
-        with torch.autograd.set_detect_anomaly(True):
-            x, mel_spec, diffusion_step_embed = input_data
-            h = x
-            B, C, L = x.shape
-            #print("B",B)
-            #print("C",C)
-            #print("L",L)
-            assert C == self.res_channels
+        x, mel_spec, diffusion_step_embed = input_data
+        h = x
+        B, C, L = x.shape
+        #print("B",B)
+        #print("C",C)
+        #print("L",L)
+        assert C == self.res_channels
 
-            # add in diffusion step embedding
-            part_t = self.fc_t(diffusion_step_embed)
-            part_t = part_t.view([B, self.res_channels, 1])
-            h = h + part_t
+        # add in diffusion step embedding
+        part_t = self.fc_t(diffusion_step_embed)
+        part_t = part_t.view([B, self.res_channels, 1])
+        h = h + part_t
 
-            # dilated conv layer
-            h = self.dilated_conv_layer(h)
+        # dilated conv layer
+        h = self.dilated_conv_layer(h)
 
-            # add mel spectrogram as (local) conditioner
-            #assert mel_spec is not None
+        # add mel spectrogram as (local) conditioner
+        #assert mel_spec is not None
 
-            # Upsample spectrogram to size of audio
-            #mel_spec = torch.unsqueeze(mel_spec, dim=1)
-            #mel_spec = F.leaky_relu(self.upsample_conv2d[0](mel_spec), 0.4)
-            #mel_spec = F.leaky_relu(self.upsample_conv2d[1](mel_spec), 0.4)
-            #mel_spec = torch.squeeze(mel_spec, dim=1)
+        # Upsample spectrogram to size of audio
+        #mel_spec = torch.unsqueeze(mel_spec, dim=1)
+        #mel_spec = F.leaky_relu(self.upsample_conv2d[0](mel_spec), 0.4)
+        #mel_spec = F.leaky_relu(self.upsample_conv2d[1](mel_spec), 0.4)
+        #mel_spec = torch.squeeze(mel_spec, dim=1)
 
-            #assert(mel_spec.size(2) >= L)
-           # if mel_spec.size(2) > L:
-            #    mel_spec = mel_spec[:, :, :L]
+        #assert(mel_spec.size(2) >= L)
+       # if mel_spec.size(2) > L:
+        #    mel_spec = mel_spec[:, :, :L]
 
-            #mel_spec = self.mel_conv(mel_spec)
-           # h += mel_spec
+        #mel_spec = self.mel_conv(mel_spec)
+       # h += mel_spec
 
-            # gated-tanh nonlinearity
-            out = torch.tanh(h[:,:self.res_channels,:]) * torch.sigmoid(h[:,self.res_channels:,:])
+        # gated-tanh nonlinearity
+        out = torch.tanh(h[:,:self.res_channels,:]) * torch.sigmoid(h[:,self.res_channels:,:])
 
-            # residual and skip outputs
-            res = self.res_conv(out)
-            assert x.shape == res.shape
-            skip = self.skip_conv(out)
+        # residual and skip outputs
+        res = self.res_conv(out)
+        assert x.shape == res.shape
+        skip = self.skip_conv(out)
 
-            return (x + res) * math.sqrt(0.5), skip  # normalize for training stability
+        return (x + res) * math.sqrt(0.5), skip  # normalize for training stability
 
 
 class Residual_group(nn.Module):
@@ -139,22 +138,22 @@ class Residual_group(nn.Module):
                                                        diffusion_step_embed_dim_out=diffusion_step_embed_dim_out))
 
     def forward(self, input_data):
-        with torch.autograd.set_detect_anomaly(True):
-            x, mel_spectrogram, diffusion_steps = input_data
 
-            # embed diffusion step t
-            diffusion_step_embed = calc_diffusion_step_embedding(diffusion_steps, self.diffusion_step_embed_dim_in)
-            diffusion_step_embed = swish(self.fc_t1(diffusion_step_embed))
-            diffusion_step_embed = swish(self.fc_t2(diffusion_step_embed))
+        x, mel_spectrogram, diffusion_steps = input_data
 
-            # pass all residual layers
-            h = x
-            skip = 0
-            for n in range(self.num_res_layers):
-                h, skip_n = self.residual_blocks[n]((h, mel_spectrogram, diffusion_step_embed))  # use the output from last residual layer
-                skip = skip + skip_n  # accumulate all skip outputs
+        # embed diffusion step t
+        diffusion_step_embed = calc_diffusion_step_embedding(diffusion_steps, self.diffusion_step_embed_dim_in)
+        diffusion_step_embed = swish(self.fc_t1(diffusion_step_embed))
+        diffusion_step_embed = swish(self.fc_t2(diffusion_step_embed))
 
-            return skip * math.sqrt(1.0 / self.num_res_layers)  # normalize for training stability
+        # pass all residual layers
+        h = x
+        skip = 0
+        for n in range(self.num_res_layers):
+            h, skip_n = self.residual_blocks[n]((h, mel_spectrogram, diffusion_step_embed))  # use the output from last residual layer
+            skip = skip + skip_n  # accumulate all skip outputs
+
+        return skip * math.sqrt(1.0 / self.num_res_layers)  # normalize for training stability
 
 
 class WaveNet_vocoder(nn.Module):
@@ -183,12 +182,11 @@ class WaveNet_vocoder(nn.Module):
                                         ZeroConv1d(skip_channels, out_channels))
 
     def forward(self, input_data):
-        with torch.autograd.set_detect_anomaly(True):
-            audio, mel_spectrogram, diffusion_steps = input_data
+        audio, mel_spectrogram, diffusion_steps = input_data
 
-            #x = audio.permute(0,2,1)
-            x = self.init_conv(audio)
-            x = self.residual_layer((x, mel_spectrogram, diffusion_steps))
-            x = self.final_conv(x)
+        #x = audio.permute(0,2,1)
+        x = self.init_conv(audio)
+        x = self.residual_layer((x, mel_spectrogram, diffusion_steps))
+        x = self.final_conv(x)
 
-            return x
+        return x

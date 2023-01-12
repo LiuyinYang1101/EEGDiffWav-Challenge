@@ -52,16 +52,16 @@ class NormConv1d(nn.Module):
 class EEGconditioner_block_simple(nn.Module):
     def __init__(self, in_channel, num_heads,out_channel):
         super(EEGconditioner_block_simple, self).__init__()
-        #self.attenLayer = nn.MultiheadAttention(64, num_heads,batch_first=True)
+        self.spatialOut = NormConv1d(64,64)
         self.conditionOut = NormConv1d(64,out_channel*2)
     def forward(self, x):
         #print("eeg input:",x.shape)
         skip_res = x
         h = x
-        cond_out = h.permute(0,2,1)
-        cond_out = swish(self.conditionOut(cond_out))
+        spatial_out = self.spatialOut(h)
+        cond_out = swish(self.conditionOut(spatial_out))
         #print("eeg condition output: ",cond_out.shape)
-        res_out = (x + skip_res) * math.sqrt(0.5)
+        res_out = (spatial_out + skip_res) * math.sqrt(0.5)
         return cond_out, res_out
     
 class EEGconditioner_block(nn.Module):
@@ -121,62 +121,61 @@ class Residual_block(nn.Module):
         nn.init.kaiming_normal_(self.skip_conv.weight)
 
     def forward(self, input_data):
-        with torch.autograd.set_detect_anomaly(True):
-            x, eeg, diffusion_step_embed = input_data
-            h = x.permute(0,2,1)
-            B, C, L = h.shape
-            #print("B",B)
-            #print("C",C)
-            #print("L",L)
-            #h = h.unsqueeze(1)
-            #print(h.shape)
-            h = self.eeg_spatial_channel_res(h)
-            #h = h.squeeze(1)
-            B, C, L = h.shape
-            #print("B after", B)
-            #print("C after", C)
-            #print("L after", L)
-            # add in diffusion step embedding
-            part_t = self.fc_t(diffusion_step_embed)
-            part_t = part_t.view([B, self.res_channels, 1])
-            #print("part_t ",part_t.shape)
-            h += part_t
+        x, eeg, diffusion_step_embed = input_data
+        #h = x.permute(0,2,1)
+        B, C, L = x.shape
+        #print("B",B)
+        #print("C",C)
+        #print("L",L)
+        #h = h.unsqueeze(1)
+        #print(h.shape)
+        h = self.eeg_spatial_channel_res(x)
+        #h = h.squeeze(1)
+        B, C, L = h.shape
+        #print("B after", B)
+        #print("C after", C)
+        #print("L after", L)
+        # add in diffusion step embedding
+        part_t = self.fc_t(diffusion_step_embed)
+        part_t = part_t.view([B, self.res_channels, 1])
+        #print("part_t ",part_t.shape)
+        h += part_t
 
-            # dilated conv layer
-            h = self.dilated_conv_layer(h)
-            #print("h shape:",h.shape)
-            # add mel spectrogram as (local) conditioner
-            #assert eeg is not None
+        # dilated conv layer
+        h = self.dilated_conv_layer(h)
+        #print("h shape:",h.shape)
+        # add mel spectrogram as (local) conditioner
+        #assert eeg is not None
 
-            # Apply transformation to eeg
-            cond_out, eeg_res = self.eeg_cond_layer(eeg)
-            #eeg_res = eeg
-            h += cond_out
-            '''
-            mel_spec = torch.unsqueeze(mel_spec, dim=1)
-            mel_spec = F.leaky_relu(self.upsample_conv2d[0](mel_spec), 0.4)
-            mel_spec = F.leaky_relu(self.upsample_conv2d[1](mel_spec), 0.4)
-            mel_spec = torch.squeeze(mel_spec, dim=1)
+        # Apply transformation to eeg
+        cond_out, eeg_res = self.eeg_cond_layer(eeg)
+        #eeg_res = eeg
+        h += cond_out
+        '''
+        mel_spec = torch.unsqueeze(mel_spec, dim=1)
+        mel_spec = F.leaky_relu(self.upsample_conv2d[0](mel_spec), 0.4)
+        mel_spec = F.leaky_relu(self.upsample_conv2d[1](mel_spec), 0.4)
+        mel_spec = torch.squeeze(mel_spec, dim=1)
 
-            assert (mel_spec.size(2) >= L)
-            if mel_spec.size(2) > L:
-                mel_spec = mel_spec[:, :, :L]
+        assert (mel_spec.size(2) >= L)
+        if mel_spec.size(2) > L:
+            mel_spec = mel_spec[:, :, :L]
 
-            mel_spec = self.mel_conv(mel_spec)
-            h += mel_spec
-            '''
-            # gated-tanh nonlinearity
-            out = torch.tanh(h[:, :self.res_channels, :]) * torch.sigmoid(h[:, self.res_channels:, :])
+        mel_spec = self.mel_conv(mel_spec)
+        h += mel_spec
+        '''
+        # gated-tanh nonlinearity
+        out = torch.tanh(h[:, :self.res_channels, :]) * torch.sigmoid(h[:, self.res_channels:, :])
 
 
-            # residual and skip outputs
-            res = self.res_conv(out).permute(0,2,1)
-            #print("x",x.shape)
-            #print("res",res.shape)
-            #assert x.shape == res.shape
-            skip = self.skip_conv(out)
+        # residual and skip outputs
+        res = self.res_conv(out)
+        #print("x",x.shape)
+        #print("res",res.shape)
+        #assert x.shape == res.shape
+        skip = self.skip_conv(out)
 
-            return (x + res) * math.sqrt(0.5), eeg_res, skip  # normalize for training stability
+        return (x + res) * math.sqrt(0.5), eeg_res, skip  # normalize for training stability
 
 
 class Residual_group(nn.Module):
