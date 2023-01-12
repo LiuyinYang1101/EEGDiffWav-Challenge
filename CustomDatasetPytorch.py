@@ -5,7 +5,7 @@ import numpy as np
 import time
 import random
 from random import randrange
-
+import math
 
 ###Test Streaming DataLoader with PyTorch####
 class MyIterableDataset(torch.utils.data.IterableDataset):
@@ -160,9 +160,29 @@ class CustomAllLoadDataset(torch.utils.data.Dataset):
         self.noData = self.generateSamplePostion()
         print(self.filePage," files loaded. ", self.noData, " training examples loaded")
 
-    def send_to_device(self, device):
-        self.EEGData = [eegtrial.to(device)  for eegtrial in self.EEGData]
-        self.AudioData = [audiotrial.to(device) for audiotrial in self.AudioData]
+    def send_to_device(self, device, no=1):
+        if no==1:
+            self.EEGData = [eegtrial.to(device)  for eegtrial in self.EEGData]
+            self.AudioData = [audiotrial.to(device) for audiotrial in self.AudioData]
+        else:
+            noFilesToSend = math.floor(self.filePage*no)
+            newEEGData = []
+            newAudData = []
+            for i in range(self.filePage):
+                tempEEG = self.EEGData.pop(0)
+                tempAud = self.AudioData.pop(0)
+                if i<noFilesToSend:
+                    newEEGData.append(tempEEG.to(device))
+                    newAudData.append(tempAud.to(device))
+                else:
+                    newEEGData.append(tempEEG)
+                    newAudData.append(tempAud)
+            assert (len(newAudData)==self.filePage)
+            self.EEGData = newEEGData
+            self.AudioData = newAudData
+
+
+
 
     def convertToTensorType(self):
         self.EEGData = [torch.from_numpy(eegtrial).permute(1,0) for eegtrial in self.EEGData]
@@ -197,13 +217,13 @@ class CustomAllLoadDataset(torch.utils.data.Dataset):
         return self.noData
 
     def __getitem__(self, idx):
-        return self.EEGData[self.sampleIndxMap[idx][0]][:,
-               self.sampleIndxMap[idx][1] - self.frameLength:self.sampleIndxMap[idx][1]], self.AudioData[
-                                                                                                 self.sampleIndxMap[
-                                                                                                     idx][0]][:,
-                                                                                             self.sampleIndxMap[idx][
-                                                                                                 1] - self.frameLength:
-                                                                                             self.sampleIndxMap[idx][1]]
+        fileIndex = self.sampleIndxMap[idx][0]
+        endIndex = self.sampleIndxMap[idx][1]
+        startIndex = self.sampleIndxMap[idx][1] - self.frameLength
+        if self.EEGData[fileIndex].is_cuda:
+            return self.EEGData[fileIndex][:,startIndex:endIndex], self.AudioData[fileIndex][:,startIndex:endIndex]
+        else:
+            return self.EEGData[fileIndex][:,startIndex:endIndex].cuda(), self.AudioData[fileIndex][:,startIndex:endIndex].cuda()
 
 
 class CustomAllLoadRawWaveDataset(torch.utils.data.Dataset):

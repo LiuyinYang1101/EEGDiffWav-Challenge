@@ -106,6 +106,9 @@ def train(window_length, hop_length, num_gpus, rank, group_name, output_director
     train_files = [path for path in Path(data_folder).resolve().glob("train_-_*") if
                    path.stem.split("_-_")[-1].split(".")[0] in features]
     train_dataset = CustomAllLoadDataset(train_files, window_length, hop_length)
+    train_dataset.convertToTensorType()
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    train_dataset.send_to_device(device, 0.7) #train_dataset.send_to_device(device, 1) if GPU memory allows to send all files to GPU
 
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=64, shuffle=True)
 
@@ -118,7 +121,7 @@ def train(window_length, hop_length, num_gpus, rank, group_name, output_director
         for i, data in enumerate(train_loader, 0):
             no_epoch = i
             # get the inputs; data is a list of [inputs, labels]
-            eeg, audio = data[0].squeeze(1).cuda(), data[1].type(torch.LongTensor).cuda()
+            eeg, audio = data[0], data[1]
             # print(eeg.shape,audio.shape)
             # load audio and mel spectrogram
             # mel_spectrogram = mel_spectrogram.cuda()
@@ -126,8 +129,7 @@ def train(window_length, hop_length, num_gpus, rank, group_name, output_director
 
             # back-propagation
             optimizer.zero_grad()
-            X = (eeg.float(), audio.float())
-            loss = mse_loss(net(eeg.float().permute(0, 2, 1)), audio.float().permute(0, 2, 1))
+            loss = mse_loss(net(eeg), audio)
             batch_loss += loss.item()
             loss.backward()
             optimizer.step()
