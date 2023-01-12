@@ -159,6 +159,15 @@ class CustomAllLoadDataset(torch.utils.data.Dataset):
         self.sampleIndxMap = []
         self.noData = self.generateSamplePostion()
         print(self.filePage," files loaded. ", self.noData, " training examples loaded")
+
+    def send_to_device(self, device):
+        self.EEGData = [eegtrial.to(device)  for eegtrial in self.EEGData]
+        self.AudioData = [audiotrial.to(device) for audiotrial in self.AudioData]
+
+    def convertToTensorType(self):
+        self.EEGData = [torch.from_numpy(eegtrial).permute(1,0) for eegtrial in self.EEGData]
+        self.AudioData = [torch.from_numpy(audiotrial).permute(1,0) for audiotrial in self.AudioData]
+
     def group_recordings(self, files):
         # Group recordings and corresponding stimuli.
         new_files = []
@@ -188,14 +197,13 @@ class CustomAllLoadDataset(torch.utils.data.Dataset):
         return self.noData
 
     def __getitem__(self, idx):
-        return self.EEGData[self.sampleIndxMap[idx][0]][
-               self.sampleIndxMap[idx][1] - self.frameLength:self.sampleIndxMap[idx][1], :], self.AudioData[
+        return self.EEGData[self.sampleIndxMap[idx][0]][:,
+               self.sampleIndxMap[idx][1] - self.frameLength:self.sampleIndxMap[idx][1]], self.AudioData[
                                                                                                  self.sampleIndxMap[
-                                                                                                     idx][0]][
+                                                                                                     idx][0]][:,
                                                                                              self.sampleIndxMap[idx][
                                                                                                  1] - self.frameLength:
-                                                                                             self.sampleIndxMap[idx][1],
-                                                                                             :]
+                                                                                             self.sampleIndxMap[idx][1]]
 
 
 class CustomAllLoadRawWaveDataset(torch.utils.data.Dataset):
